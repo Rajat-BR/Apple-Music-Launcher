@@ -1,0 +1,1 @@
+print("Apple Music Launcher")
