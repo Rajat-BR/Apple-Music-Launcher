@@ -4,6 +4,7 @@ import subprocess
 import time
 
 from pathlib import Path
+from getpass import getpass
 
 # Launch Docker Desktop
 def start_docker_desktop():
@@ -93,9 +94,21 @@ if not wrapper_path.is_dir():
     print("Wrapper path must be a directory.")
     sys.exit()
 
+# Helper function 
+def stop_existing_wrapper():
+    subprocess.run(
+        [
+            "docker",
+            "stop",
+            "apple-music-wrapper"
+        ],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL
+    )
 
 def start_wrapper():
 
+    stop_existing_wrapper()
     print("Starting wrapper container...")
     wrapper_data = wrapper_path / "rootfs" / "data"
     wrapper_data.mkdir(parents=True, exist_ok=True)
@@ -105,6 +118,7 @@ def start_wrapper():
             [
                 "docker",
                 "run",
+                "--name", "apple-music-wrapper",
                 "-v", f"{wrapper_data}:/app/rootfs/data",
                 "-p", "10020:10020",
                 "-p", "20020:20020",
@@ -118,6 +132,47 @@ def start_wrapper():
         print("Docker CLI not found.")
         sys.exit(1)
 
+def login_wrapper():
+
+    stop_existing_wrapper()
+    print("Wrapper Login")
+    print()
+    email = input("Apple ID: ")
+    password = getpass("Password: ")
+    wrapper_data = wrapper_path / "rootfs" / "data"
+    wrapper_data.mkdir(parents=True, exist_ok=True)
+
+    try:
+        subprocess.run(
+            [
+                "docker",
+                "run",
+                "--name", "apple-music-wrapper",
+                "-v", f"{wrapper_data}:/app/rootfs/data",
+                "-e", f"args=-L {email}:{password} -F",
+                "--rm",
+                "ghcr.io/itouakirai/wrapper:x86"
+            ],
+            check=True
+        )
+        print("Login completed successfully.")
+
+    except subprocess.CalledProcessError:
+        print("Wrapper login failed.")
+        sys.exit(1)
+
+    except FileNotFoundError:
+        print("Docker CLI not found.")
+        sys.exit(1)
+
+
+
+
+# ==============================================================
 start_docker_desktop()
 wait_for_docker()
-start_wrapper()
+
+if "--login" in sys.argv:
+    login_wrapper()
+else:
+    start_wrapper()
