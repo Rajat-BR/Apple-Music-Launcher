@@ -5,6 +5,7 @@ import time
 
 from pathlib import Path
 
+# Launch Docker Desktop
 def start_docker_desktop():
 
     print("Starting Docker Desktop...")
@@ -18,10 +19,40 @@ def start_docker_desktop():
     except FileNotFoundError:
         print("'open' command not found.")
         sys.exit(1)
-        
+
     except subprocess.CalledProcessError:
         print("Failed to launch Docker Desktop.")
         sys.exit(1)
+
+# Wait for Docker Daemon
+def wait_for_docker(timeout=60):
+
+    print("Waiting for Docker...")
+    start_time = time.time()
+
+    while True:
+        try:
+            subprocess.run(
+                ["docker", "info"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=True
+            )
+            print("Docker is ready.")
+            return
+
+        except subprocess.CalledProcessError:
+            pass
+
+        except FileNotFoundError:
+            print("Docker CLI not found.")
+            sys.exit(1)
+
+        if time.time() - start_time > timeout:
+            print("Timed out waiting for Docker.")
+            sys.exit(1)
+
+        time.sleep(1)
 
 config_path = Path(__file__).parent / "config.json"
 
@@ -34,14 +65,15 @@ if not config["gui_path"]:
 
 gui_path = Path(config["gui_path"])
 
-#Check if the path doesn't exist
+# Check if the path doesn't exist
 if not gui_path.exists():
     print("Path doesn't exist !")
     sys.exit()
 
-#Check if the path is not a directory
+# Check if the path is not a directory
 if not gui_path.is_dir():
     print("GUI path must be a directory")
     sys.exit()
 
 start_docker_desktop()
+wait_for_docker()
