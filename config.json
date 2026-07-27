@@ -1,4 +1,4 @@
 {
-    "gui_path": "/Users/rajat/VS Code/Apple_Music_New/apmyx-gui/",
-    "docker_command": ""
+    "gui_path": "/Users/rajat/Apple Music Downloader/GUI/apmyx-gui",
+    "wrapper_path": "/Users/rajat/Apple Music Downloader/Wrapper"
 }
