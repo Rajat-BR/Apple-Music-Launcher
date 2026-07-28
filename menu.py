@@ -35,4 +35,4 @@ def print_menu():
 def get_choice():
     console.print()
     console.print("[bold #B00000]Apple Music[/bold #B00000] >", end=" ")
-    return input()
+    return int(input())
