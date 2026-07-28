@@ -188,6 +188,31 @@ def wait_for_wrapper(timeout=30):
 
         time.sleep(1)
 
+def start_gui():
+
+    print("Starting GUI...")
+
+    gui_root = gui_path
+    python_executable = gui_root / "venv" / "bin" / "python"
+    main_script = gui_root / "src" / "main.py"  
+   
+    if not python_executable.exists():
+        print("Python executable not found in GUI virtual environment.")
+        sys.exit(1)
+
+    if not main_script.exists():
+        print("GUI entry point not found.")
+        sys.exit(1)
+
+    try:
+        subprocess.Popen(
+            [str(python_executable), str(main_script)],
+            cwd=gui_root
+        )
+
+    except FileNotFoundError:
+        print("Failed to launch GUI.")
+        sys.exit(1)
 
 # ==============================================================
 start_docker_desktop()
@@ -198,3 +223,4 @@ if "--login" in sys.argv:
 else:
     start_wrapper()
     wait_for_wrapper()
+    start_gui()
