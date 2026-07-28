@@ -2,6 +2,7 @@ import sys
 import json
 import subprocess
 import time
+import socket
 
 from pathlib import Path
 from getpass import getpass
@@ -165,7 +166,27 @@ def login_wrapper():
         print("Docker CLI not found.")
         sys.exit(1)
 
+def wait_for_wrapper(timeout=30):
 
+    print("Waiting for wrapper...")
+
+    start_time = time.time()
+
+    while True:
+
+        try:
+            with socket.create_connection(("127.0.0.1", 10020), timeout=1):
+                print("Wrapper is ready.")
+                return
+
+        except OSError:
+            pass
+
+        if time.time() - start_time > timeout:
+            print("Timed out waiting for wrapper.")
+            sys.exit(1)
+
+        time.sleep(1)
 
 
 # ==============================================================
@@ -176,3 +197,4 @@ if "--login" in sys.argv:
     login_wrapper()
 else:
     start_wrapper()
+    wait_for_wrapper()
