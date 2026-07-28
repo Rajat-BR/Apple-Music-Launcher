@@ -6,6 +6,12 @@ import socket
 
 from pathlib import Path
 from getpass import getpass
+from rich.console import Console
+
+from banner import print_banner
+from menu import print_menu, get_choice
+
+console = Console()
 
 # Launch Docker Desktop
 def start_docker_desktop():
@@ -214,13 +220,32 @@ def start_gui():
         print("Failed to launch GUI.")
         sys.exit(1)
 
-# ==============================================================
-start_docker_desktop()
-wait_for_docker()
-
-if "--login" in sys.argv:
-    login_wrapper()
-else:
+def launch():
+    start_docker_desktop()
+    wait_for_docker()
     start_wrapper()
     wait_for_wrapper()
     start_gui()
+
+def refresh_login():
+    start_docker_desktop()
+    wait_for_docker()
+    login_wrapper()
+
+# ==============================================================
+#                    Terminal Interface
+# ==============================================================
+print_banner()
+print_menu()
+
+choice = get_choice()
+
+if choice == 1:
+    launch()
+elif choice == 2:
+    refresh_login()
+elif choice == 3:
+    console.print("\n[bold #B00000]Goodbye![/bold #B00000]")
+    sys.exit(0)
+else:
+    print("Invalid option")
