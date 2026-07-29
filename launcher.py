@@ -254,26 +254,36 @@ def refresh_login():
 # ==============================================================
 #                    Terminal Interface
 # ==============================================================
-while True:
 
-    print_banner()
-    print_menu()
-    choice = get_choice()
+def main():
+    while True:
 
-    if choice == 1:
-        launch()
+        print_banner()
+        print_menu()
+        choice = get_choice()
 
-    elif choice == 2:
-        refresh_login()
-        console.print(
-            "\n[bold green]Returning to main menu...[/bold green]\n"
-        )
-        input("Press Enter to continue...")
+        if choice == 1:
+            launch()
 
-    elif choice == 3:
-        console.print("\n[bold #B00000]Goodbye![/bold #B00000]")
+        elif choice == 2:
+            refresh_login()
+            console.print(
+                "\n[bold green]Returning to main menu...[/bold green]\n"
+            )
+            input("Press Enter to continue...")
+
+        elif choice == 3:
+            console.print("\n[bold #B00000]Goodbye![/bold #B00000]")
+            sys.exit(0)
+
+        else:
+            console.print("\n[bold red]Invalid option![/bold red]\n")
+            input("Press Enter to continue...")
+
+if __name__ == "__main__":
+    try:
+        main()
+
+    except KeyboardInterrupt:
+        console.print("\n[bold #B00000]Interrupted. Goodbye![/bold #B00000]")
         sys.exit(0)
-
-    else:
-        console.print("\n[bold red]Invalid option![/bold red]\n")
-        input("Press Enter to continue...")
