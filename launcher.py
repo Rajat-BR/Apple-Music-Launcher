@@ -159,13 +159,18 @@ def login_wrapper():
             [
                 "docker",
                 "run",
+                "-d",
                 "--name", "apple-music-wrapper",
                 "-v", f"{wrapper_data}:/app/rootfs/data",
+                "-p", "10020:10020",
+                "-p", "20020:20020",
                 "-e", f"args=-L {email}:{password} -F",
                 "--rm",
                 "ghcr.io/itouakirai/wrapper:x86",
             ],
             stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
             start_new_session=True,
         )
         wait_for_wrapper()
