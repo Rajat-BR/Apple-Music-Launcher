@@ -142,6 +142,7 @@ def start_wrapper():
 def login_wrapper():
 
     stop_existing_wrapper()
+
     print("Wrapper Login")
     print()
     email = input("Apple ID: ")
@@ -150,7 +151,7 @@ def login_wrapper():
     wrapper_data.mkdir(parents=True, exist_ok=True)
 
     try:
-        subprocess.run(
+        subprocess.Popen(
             [
                 "docker",
                 "run",
@@ -158,18 +159,21 @@ def login_wrapper():
                 "-v", f"{wrapper_data}:/app/rootfs/data",
                 "-e", f"args=-L {email}:{password} -F",
                 "--rm",
-                "ghcr.io/itouakirai/wrapper:x86"
+                "ghcr.io/itouakirai/wrapper:x86",
             ],
-            check=True
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
         )
-        print("Login completed successfully.")
-
-    except subprocess.CalledProcessError:
-        print("Wrapper login failed.")
-        sys.exit(1)
+        wait_for_wrapper()
+        print("\nLogin completed successfully.")
+        return
 
     except FileNotFoundError:
         print("Docker CLI not found.")
+        sys.exit(1)
+
+    except Exception as e:
+        print(f"Wrapper login failed: {e}")
         sys.exit(1)
 
 def wait_for_wrapper(timeout=30):
