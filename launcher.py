@@ -132,7 +132,11 @@ def start_wrapper():
                 "-e", "args=-M 20020 -H 0.0.0.0",
                 "--rm",
                 "ghcr.io/itouakirai/wrapper:x86"
-            ]
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
         )
 
     except FileNotFoundError:
@@ -161,8 +165,8 @@ def login_wrapper():
                 "--rm",
                 "ghcr.io/itouakirai/wrapper:x86",
             ],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL,
+            start_new_session=True,
         )
         wait_for_wrapper()
         print("\nLogin completed successfully.")
@@ -217,7 +221,11 @@ def start_gui():
     try:
         subprocess.Popen(
             [str(python_executable), str(main_script)],
-            cwd=gui_root
+            cwd=gui_root,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
         )
 
     except FileNotFoundError:
@@ -230,6 +238,8 @@ def launch():
     start_wrapper()
     wait_for_wrapper()
     start_gui()
+    print("GUI launched successfully.")
+    sys.exit(0)
 
 def refresh_login():
     start_docker_desktop()
@@ -239,17 +249,26 @@ def refresh_login():
 # ==============================================================
 #                    Terminal Interface
 # ==============================================================
-print_banner()
-print_menu()
+while True:
 
-choice = get_choice()
+    print_banner()
+    print_menu()
+    choice = get_choice()
 
-if choice == 1:
-    launch()
-elif choice == 2:
-    refresh_login()
-elif choice == 3:
-    console.print("\n[bold #B00000]Goodbye![/bold #B00000]")
-    sys.exit(0)
-else:
-    print("Invalid option")
+    if choice == 1:
+        launch()
+
+    elif choice == 2:
+        refresh_login()
+        console.print(
+            "\n[bold green]Returning to main menu...[/bold green]\n"
+        )
+        input("Press Enter to continue...")
+
+    elif choice == 3:
+        console.print("\n[bold #B00000]Goodbye![/bold #B00000]")
+        sys.exit(0)
+
+    else:
+        console.print("\n[bold red]Invalid option![/bold red]\n")
+        input("Press Enter to continue...")
