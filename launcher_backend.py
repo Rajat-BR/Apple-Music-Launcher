@@ -1,0 +1,264 @@
+import json
+import subprocess
+import time
+import socket
+
+from pathlib import Path
+
+DEFAULT_CONFIG_PATH = Path(__file__).parent / "config.json"
+
+# Populated by load_config(). Read by start_gui(), start_wrapper(),
+# and login_wrapper() below.
+gui_path = None
+wrapper_path = None
+
+
+class LauncherError(Exception):
+    """
+    Raised when a backend operation fails. This module never exits the
+    process itself - it's shared by the CLI (launcher.py) and the GUI
+    (gui.py), and each frontend decides how to react to a failure
+    (print + sys.exit for the CLI, a QMessageBox for the GUI).
+    """
+    pass
+
+
+def load_config(config_path=None):
+    """
+    Load and validate config.json, populating the module-level
+    gui_path and wrapper_path used by the rest of this module.
+
+    Must be called once by a frontend before calling launch() or
+    refresh_login(). Raises LauncherError if the config is invalid.
+    """
+    global gui_path, wrapper_path
+
+    path = config_path or DEFAULT_CONFIG_PATH
+
+    try:
+        with open(path, 'r') as f:
+            config = json.load(f)
+    except FileNotFoundError:
+        raise LauncherError("config.json not found.")
+    except json.JSONDecodeError:
+        raise LauncherError("config.json contains invalid JSON.")
+
+    if not config["gui_path"]:
+        raise LauncherError("GUI path is not configured !")
+
+    candidate_gui_path = Path(config["gui_path"])
+
+    # Check if the path doesn't exist
+    if not candidate_gui_path.exists():
+        raise LauncherError("Path doesn't exist !")
+
+    # Check if the path is not a directory
+    if not candidate_gui_path.is_dir():
+        raise LauncherError("GUI path must be a directory")
+
+    # Check if the path is empty
+    if not config["wrapper_path"]:
+        raise LauncherError("Wrapper path is not configured.")
+
+    candidate_wrapper_path = Path(config["wrapper_path"])
+
+    # Check if the path doesn't exist
+    if not candidate_wrapper_path.exists():
+        raise LauncherError("Wrapper path doesn't exist.")
+
+    # Check if the path is not a directory
+    if not candidate_wrapper_path.is_dir():
+        raise LauncherError("Wrapper path must be a directory.")
+
+    gui_path = candidate_gui_path
+    wrapper_path = candidate_wrapper_path
+
+
+# Launch Docker Desktop
+def start_docker_desktop():
+
+    print("Starting Docker Desktop...")
+
+    try:
+        subprocess.run(
+            ["/usr/bin/open", "-a", "Docker"],
+            check=True
+        )
+
+    except FileNotFoundError:
+        raise LauncherError("'open' command not found.")
+
+    except subprocess.CalledProcessError:
+        raise LauncherError("Failed to launch Docker Desktop.")
+
+# Wait for Docker Daemon
+def wait_for_docker(timeout=60):
+
+    print("Waiting for Docker...")
+    start_time = time.time()
+
+    while True:
+        try:
+            subprocess.run(
+                ["docker", "info"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=True
+            )
+            print("Docker is ready.")
+            return
+
+        except subprocess.CalledProcessError:
+            pass
+
+        except FileNotFoundError:
+            raise LauncherError("Docker CLI not found.")
+
+        if time.time() - start_time > timeout:
+            raise LauncherError("Timed out waiting for Docker.")
+
+        time.sleep(1)
+
+
+# Helper function
+def stop_existing_wrapper():
+    subprocess.run(
+        [
+            "docker",
+            "stop",
+            "apple-music-wrapper"
+        ],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL
+    )
+
+def start_wrapper():
+
+    stop_existing_wrapper()
+    print("Starting wrapper container...")
+    wrapper_data = wrapper_path / "rootfs" / "data"
+    wrapper_data.mkdir(parents=True, exist_ok=True)
+
+    try:
+        subprocess.Popen(
+            [
+                "docker",
+                "run",
+                "--name", "apple-music-wrapper",
+                "-v", f"{wrapper_data}:/app/rootfs/data",
+                "-p", "10020:10020",
+                "-p", "20020:20020",
+                "-e", "args=-M 20020 -H 0.0.0.0",
+                "--rm",
+                "ghcr.io/itouakirai/wrapper:x86"
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+
+    except FileNotFoundError:
+        raise LauncherError("Docker CLI not found.")
+
+def login_wrapper(email, password):
+
+    stop_existing_wrapper()
+
+    print("Wrapper Login")
+    print()
+    wrapper_data = wrapper_path / "rootfs" / "data"
+    wrapper_data.mkdir(parents=True, exist_ok=True)
+
+    try:
+        subprocess.Popen(
+            [
+                "docker",
+                "run",
+                "-d",
+                "--name", "apple-music-wrapper",
+                "-v", f"{wrapper_data}:/app/rootfs/data",
+                "-p", "10020:10020",
+                "-p", "20020:20020",
+                "-e", f"args=-L {email}:{password} -F",
+                "--rm",
+                "ghcr.io/itouakirai/wrapper:x86",
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        wait_for_wrapper()
+        print("\nLogin completed successfully.")
+        return
+
+    except FileNotFoundError:
+        raise LauncherError("Docker CLI not found.")
+
+    except LauncherError:
+        raise
+
+    except Exception as e:
+        raise LauncherError(f"Wrapper login failed: {e}")
+
+def wait_for_wrapper(timeout=30):
+
+    print("Waiting for wrapper...")
+
+    start_time = time.time()
+
+    while True:
+
+        try:
+            with socket.create_connection(("127.0.0.1", 10020), timeout=1):
+                print("Wrapper is ready.")
+                return
+
+        except OSError:
+            pass
+
+        if time.time() - start_time > timeout:
+            raise LauncherError("Timed out waiting for wrapper.")
+
+        time.sleep(1)
+
+def start_gui():
+
+    print("Starting GUI...")
+
+    gui_root = gui_path
+    python_executable = gui_root / "venv" / "bin" / "python"
+    main_script = gui_root / "src" / "main.py"
+
+    if not python_executable.exists():
+        raise LauncherError("Python executable not found in GUI virtual environment.")
+
+    if not main_script.exists():
+        raise LauncherError("GUI entry point not found.")
+
+    try:
+        subprocess.Popen(
+            [str(python_executable), str(main_script)],
+            cwd=gui_root,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+
+    except FileNotFoundError:
+        raise LauncherError("Failed to launch GUI.")
+
+def launch():
+    start_docker_desktop()
+    wait_for_docker()
+    start_wrapper()
+    wait_for_wrapper()
+    start_gui()
+    print("GUI launched successfully.")
+
+def refresh_login(email, password):
+    start_docker_desktop()
+    wait_for_docker()
+    login_wrapper(email, password)

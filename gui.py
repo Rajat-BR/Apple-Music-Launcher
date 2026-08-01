@@ -8,10 +8,17 @@ from PyQt6.QtWidgets import (
     QLabel,
     QPushButton,
     QVBoxLayout,
+    QFormLayout,
     QSizePolicy,
+    QMessageBox,
+    QDialog,
+    QLineEdit,
+    QDialogButtonBox,
 )
 from PyQt6.QtGui import QPixmap
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QThread, pyqtSignal
+
+from launcher_backend import launch, refresh_login, load_config, LauncherError
 
 BANNER_PATH = Path(__file__).parent / "banner.png"
 
@@ -22,7 +29,7 @@ BUTTON_HEIGHT = 44
 
 DARK_STYLESHEET = """
 QWidget {
-    background-color: #000000;
+    background-color: #121212;
     color: #E0E0E0;
     font-family: "Helvetica Neue", sans-serif;
 }
@@ -51,7 +58,111 @@ QLabel#statusLabel {
     color: #999999;
     font-size: 12px;
 }
+
+QLineEdit {
+    background-color: #1E1E1E;
+    border: 1px solid #444444;
+    border-radius: 4px;
+    padding: 6px 8px;
+    color: #E0E0E0;
+    selection-background-color: #B00000;
+}
+
+QLineEdit:focus {
+    border: 1px solid #B00000;
+}
 """
+
+
+class BackendWorker(QThread):
+    """
+    Runs a single backend callable (e.g. launch, refresh_login) on a
+    background thread so the GUI stays responsive.
+
+    Does not alter the callable in any way. The backend (launcher_backend.py)
+    raises LauncherError on failure and returns normally on success - it no
+    longer calls sys.exit(), so there's nothing special to catch beyond
+    ordinary exceptions.
+    """
+
+    finished_signal = pyqtSignal(bool, str)
+
+    def __init__(self, target, *args, **kwargs):
+        super().__init__()
+        self._target = target
+        self._args = args
+        self._kwargs = kwargs
+
+    def run(self):
+        try:
+            self._target(*self._args, **self._kwargs)
+        except LauncherError as exc:
+            # Expected backend failure (bad config, docker not found, timeout, etc.)
+            self.finished_signal.emit(False, str(exc))
+            return
+        except Exception as exc:
+            # Unexpected bug - still reported the same way, but kept
+            # separate so it's obvious in the code which case is which.
+            self.finished_signal.emit(False, str(exc))
+            return
+
+        self.finished_signal.emit(True, "")
+
+
+class LoginDialog(QDialog):
+    """
+    Collects an Apple ID and password, replacing the terminal
+    input()/getpass() prompts that login_wrapper() used to do itself.
+    The credentials are only handed to the backend on accept - this
+    dialog has no knowledge of Docker or the wrapper container.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Wrapper Login")
+        self.setFixedWidth(320)
+
+        self.email_input = QLineEdit()
+        self.email_input.setPlaceholderText("you@example.com")
+
+        self.password_input = QLineEdit()
+        self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.password_input.setPlaceholderText("Password")
+
+        form_layout = QFormLayout()
+        form_layout.addRow("Apple ID:", self.email_input)
+        form_layout.addRow("Password:", self.password_input)
+
+        button_box = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok
+            | QDialogButtonBox.StandardButton.Cancel
+        )
+        button_box.accepted.connect(self._on_accept)
+        button_box.rejected.connect(self.reject)
+
+        layout = QVBoxLayout()
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(16)
+        layout.addLayout(form_layout)
+        layout.addWidget(button_box)
+        self.setLayout(layout)
+
+        self.email = ""
+        self.password = ""
+
+    def _on_accept(self):
+        email = self.email_input.text().strip()
+        password = self.password_input.text()
+
+        if not email or not password:
+            QMessageBox.warning(
+                self, "Missing Information", "Apple ID and password are both required."
+            )
+            return
+
+        self.email = email
+        self.password = password
+        self.accept()
 
 
 class LauncherWindow(QMainWindow):
@@ -98,10 +209,49 @@ class LauncherWindow(QMainWindow):
 
         central_widget.setLayout(layout)
 
-        # Phase 1: exit is the only wired action, since it needs no backend call.
+        # Phase 2: launch and refresh now run on background threads.
+        self.launch_button.clicked.connect(self._on_launch_clicked)
+        self.refresh_button.clicked.connect(self._on_refresh_clicked)
         self.exit_button.clicked.connect(self.close)
 
         self._center_on_screen()
+
+        # Keep references to running workers so they aren't garbage collected mid-run.
+        self._active_worker = None
+
+    def _set_buttons_enabled(self, enabled):
+        self.launch_button.setEnabled(enabled)
+        self.refresh_button.setEnabled(enabled)
+
+    def _run_backend(self, target, status_message, *args, **kwargs):
+        self._set_buttons_enabled(False)
+        self.status_label.setText(status_message)
+
+        self._active_worker = BackendWorker(target, *args, **kwargs)
+        self._active_worker.finished_signal.connect(self._on_backend_finished)
+        self._active_worker.start()
+
+    def _on_backend_finished(self, success, error_message):
+        self._set_buttons_enabled(True)
+        self._active_worker = None
+
+        if success:
+            self.status_label.setText("Done.")
+        else:
+            self.status_label.setText("")
+            QMessageBox.critical(self, "Error", error_message or "Operation failed.")
+
+    def _on_launch_clicked(self):
+        self._run_backend(launch, "Launching Apple Music...")
+
+    def _on_refresh_clicked(self):
+        dialog = LoginDialog(self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        self._run_backend(
+            refresh_login, "Refreshing login...", dialog.email, dialog.password
+        )
 
     def _center_on_screen(self):
         screen_geometry = QApplication.primaryScreen().availableGeometry()
@@ -126,6 +276,12 @@ class LauncherWindow(QMainWindow):
 def main():
     app = QApplication(sys.argv)
     app.setStyleSheet(DARK_STYLESHEET)
+
+    try:
+        load_config()
+    except LauncherError as e:
+        QMessageBox.critical(None, "Configuration Error", str(e))
+        sys.exit(1)
 
     window = LauncherWindow()
     window.show()
