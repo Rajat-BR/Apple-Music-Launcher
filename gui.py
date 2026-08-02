@@ -77,15 +77,21 @@ QLineEdit:focus {
 class BackendWorker(QThread):
     """
     Runs a single backend callable (e.g. launch, refresh_login) on a
-    background thread so the GUI stays responsive.
+    background thread so the GUI stays responsive. Does not alter the
+    callable in any way. Backend functions now return normally on
+    success and raise LauncherError (or another exception) on
+    failure, so we just need to catch and report.
 
-    Does not alter the callable in any way. The backend (launcher_backend.py)
-    raises LauncherError on failure and returns normally on success - it no
-    longer calls sys.exit(), so there's nothing special to catch beyond
-    ordinary exceptions.
+    Every backend entry point (launch, refresh_login) accepts an
+    optional status_callback keyword argument - this worker always
+    supplies its own status_signal.emit as that callback, so backend
+    progress messages (the same ones the CLI prints) reach the GUI
+    without any string duplication. Qt marshals the emit() call from
+    this thread to the main-thread slot automatically.
     """
 
     finished_signal = pyqtSignal(bool, str)
+    status_signal = pyqtSignal(str)
 
     def __init__(self, target, *args, **kwargs):
         super().__init__()
@@ -95,7 +101,11 @@ class BackendWorker(QThread):
 
     def run(self):
         try:
-            self._target(*self._args, **self._kwargs)
+            self._target(
+                *self._args,
+                status_callback=self.status_signal.emit,
+                **self._kwargs,
+            )
         except LauncherError as exc:
             # Expected backend failure (bad config, docker not found, timeout, etc.)
             self.finished_signal.emit(False, str(exc))
@@ -228,18 +238,23 @@ class LauncherWindow(QMainWindow):
         self.status_label.setText(status_message)
 
         self._active_worker = BackendWorker(target, *args, **kwargs)
+        self._active_worker.status_signal.connect(self._on_status_update)
         self._active_worker.finished_signal.connect(self._on_backend_finished)
         self._active_worker.start()
+
+    def _on_status_update(self, message):
+        # Runs on the GUI thread (Qt queues the cross-thread signal for us).
+        self.status_label.setText(message.strip())
 
     def _on_backend_finished(self, success, error_message):
         self._set_buttons_enabled(True)
         self._active_worker = None
 
-        if success:
-            self.status_label.setText("Done.")
-        else:
+        if not success:
             self.status_label.setText("")
             QMessageBox.critical(self, "Error", error_message or "Operation failed.")
+        # On success, leave the label showing the last status message
+        # the backend reported (e.g. "GUI launched successfully.").
 
     def _on_launch_clicked(self):
         self._run_backend(launch, "Launching Apple Music...")

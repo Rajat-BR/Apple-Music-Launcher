@@ -23,6 +23,18 @@ class LauncherError(Exception):
     pass
 
 
+def report_status(message, status_callback=None):
+    """
+    Single source of truth for a progress message: always prints it
+    (so the CLI output is unchanged), and additionally hands it to
+    status_callback if one was provided (so the GUI can display the
+    same message without duplicating any strings).
+    """
+    print(message)
+    if status_callback is not None:
+        status_callback(message)
+
+
 def load_config(config_path=None):
     """
     Load and validate config.json, populating the module-level
@@ -75,9 +87,9 @@ def load_config(config_path=None):
 
 
 # Launch Docker Desktop
-def start_docker_desktop():
+def start_docker_desktop(status_callback=None):
 
-    print("Starting Docker Desktop...")
+    report_status("Starting Docker Desktop...", status_callback)
 
     try:
         subprocess.run(
@@ -92,9 +104,9 @@ def start_docker_desktop():
         raise LauncherError("Failed to launch Docker Desktop.")
 
 # Wait for Docker Daemon
-def wait_for_docker(timeout=60):
+def wait_for_docker(timeout=60, status_callback=None):
 
-    print("Waiting for Docker...")
+    report_status("Waiting for Docker...", status_callback)
     start_time = time.time()
 
     while True:
@@ -105,7 +117,7 @@ def wait_for_docker(timeout=60):
                 stderr=subprocess.DEVNULL,
                 check=True
             )
-            print("Docker is ready.")
+            report_status("Docker is ready.", status_callback)
             return
 
         except subprocess.CalledProcessError:
@@ -132,10 +144,10 @@ def stop_existing_wrapper():
         stderr=subprocess.DEVNULL
     )
 
-def start_wrapper():
+def start_wrapper(status_callback=None):
 
     stop_existing_wrapper()
-    print("Starting wrapper container...")
+    report_status("Starting wrapper container...", status_callback)
     wrapper_data = wrapper_path / "rootfs" / "data"
     wrapper_data.mkdir(parents=True, exist_ok=True)
 
@@ -161,7 +173,7 @@ def start_wrapper():
     except FileNotFoundError:
         raise LauncherError("Docker CLI not found.")
 
-def login_wrapper(email, password):
+def login_wrapper(email, password, status_callback=None):
 
     stop_existing_wrapper()
 
@@ -189,7 +201,7 @@ def login_wrapper(email, password):
             stderr=subprocess.DEVNULL,
             start_new_session=True,
         )
-        wait_for_wrapper()
+        wait_for_wrapper(status_callback=status_callback)
         print("\nLogin completed successfully.")
         return
 
@@ -202,9 +214,9 @@ def login_wrapper(email, password):
     except Exception as e:
         raise LauncherError(f"Wrapper login failed: {e}")
 
-def wait_for_wrapper(timeout=30):
+def wait_for_wrapper(timeout=30, status_callback=None):
 
-    print("Waiting for wrapper...")
+    report_status("Waiting for wrapper...", status_callback)
 
     start_time = time.time()
 
@@ -212,7 +224,7 @@ def wait_for_wrapper(timeout=30):
 
         try:
             with socket.create_connection(("127.0.0.1", 10020), timeout=1):
-                print("Wrapper is ready.")
+                report_status("Wrapper is ready.", status_callback)
                 return
 
         except OSError:
@@ -223,9 +235,9 @@ def wait_for_wrapper(timeout=30):
 
         time.sleep(1)
 
-def start_gui():
+def start_gui(status_callback=None):
 
-    print("Starting GUI...")
+    report_status("Starting GUI...", status_callback)
 
     gui_root = gui_path
     python_executable = gui_root / "venv" / "bin" / "python"
@@ -250,15 +262,15 @@ def start_gui():
     except FileNotFoundError:
         raise LauncherError("Failed to launch GUI.")
 
-def launch():
-    start_docker_desktop()
-    wait_for_docker()
-    start_wrapper()
-    wait_for_wrapper()
-    start_gui()
-    print("GUI launched successfully.")
+def launch(status_callback=None):
+    start_docker_desktop(status_callback=status_callback)
+    wait_for_docker(status_callback=status_callback)
+    start_wrapper(status_callback=status_callback)
+    wait_for_wrapper(status_callback=status_callback)
+    start_gui(status_callback=status_callback)
+    report_status("GUI launched successfully.", status_callback)
 
-def refresh_login(email, password):
-    start_docker_desktop()
-    wait_for_docker()
-    login_wrapper(email, password)
+def refresh_login(email, password, status_callback=None):
+    start_docker_desktop(status_callback=status_callback)
+    wait_for_docker(status_callback=status_callback)
+    login_wrapper(email, password, status_callback=status_callback)
