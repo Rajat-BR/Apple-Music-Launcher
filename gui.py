@@ -16,12 +16,13 @@ from PyQt6.QtWidgets import (
     QDialogButtonBox,
     QProgressBar,
 )
-from PyQt6.QtGui import QPixmap
+from PyQt6.QtGui import QPixmap, QIcon
 from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal
 
 from launcher_backend import launch, refresh_login, load_config, LauncherError
 
 BANNER_PATH = Path(__file__).parent / "banner.png"
+ICON_PATH = Path(__file__).parent / "icon.png"
 
 WINDOW_WIDTH = 420
 WINDOW_HEIGHT = 560
@@ -195,6 +196,9 @@ class LauncherWindow(QMainWindow):
         self.setWindowTitle("Apple Music Launcher")
         self.setFixedSize(WINDOW_WIDTH, WINDOW_HEIGHT)
 
+        if ICON_PATH.exists():
+            self.setWindowIcon(QIcon(str(ICON_PATH)))
+
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
 
@@ -349,6 +353,9 @@ class LauncherWindow(QMainWindow):
 def main():
     app = QApplication(sys.argv)
     app.setStyleSheet(DARK_STYLESHEET)
+
+    if ICON_PATH.exists():
+        app.setWindowIcon(QIcon(str(ICON_PATH)))
 
     try:
         load_config()
