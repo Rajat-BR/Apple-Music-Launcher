@@ -14,9 +14,10 @@ from PyQt6.QtWidgets import (
     QDialog,
     QLineEdit,
     QDialogButtonBox,
+    QProgressBar,
 )
 from PyQt6.QtGui import QPixmap
-from PyQt6.QtCore import Qt, QThread, pyqtSignal
+from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal
 
 from launcher_backend import launch, refresh_login, load_config, LauncherError
 
@@ -71,21 +72,39 @@ QLineEdit {
 QLineEdit:focus {
     border: 1px solid #B00000;
 }
+
+QProgressBar {
+    background-color: #1E1E1E;
+    border: 1px solid #444444;
+    border-radius: 3px;
+    height: 6px;
+}
+
+QProgressBar::chunk {
+    background-color: #B00000;
+    border-radius: 3px;
+}
 """
 
 
 class BackendWorker(QThread):
     """
     Runs a single backend callable (e.g. launch, refresh_login) on a
-    background thread so the GUI stays responsive.
+    background thread so the GUI stays responsive. Does not alter the
+    callable in any way. Backend functions now return normally on
+    success and raise LauncherError (or another exception) on
+    failure, so we just need to catch and report.
 
-    Does not alter the callable in any way. The backend (launcher_backend.py)
-    raises LauncherError on failure and returns normally on success - it no
-    longer calls sys.exit(), so there's nothing special to catch beyond
-    ordinary exceptions.
+    Every backend entry point (launch, refresh_login) accepts an
+    optional status_callback keyword argument - this worker always
+    supplies its own status_signal.emit as that callback, so backend
+    progress messages (the same ones the CLI prints) reach the GUI
+    without any string duplication. Qt marshals the emit() call from
+    this thread to the main-thread slot automatically.
     """
 
     finished_signal = pyqtSignal(bool, str)
+    status_signal = pyqtSignal(str)
 
     def __init__(self, target, *args, **kwargs):
         super().__init__()
@@ -95,7 +114,11 @@ class BackendWorker(QThread):
 
     def run(self):
         try:
-            self._target(*self._args, **self._kwargs)
+            self._target(
+                *self._args,
+                status_callback=self.status_signal.emit,
+                **self._kwargs,
+            )
         except LauncherError as exc:
             # Expected backend failure (bad config, docker not found, timeout, etc.)
             self.finished_signal.emit(False, str(exc))
@@ -201,7 +224,25 @@ class LauncherWindow(QMainWindow):
 
         layout.addStretch(1)
 
-        # --- Status label (for later phases) ---
+        # --- Busy indicator ---
+        # QProgressBar's built-in indeterminate ("marquee") animation
+        # doesn't reliably animate once a QSS stylesheet is applied to
+        # it, so we drive a bouncing fill manually with a QTimer -
+        # this guarantees visible motion regardless of platform/style.
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setTextVisible(False)
+        self.progress_bar.setFixedHeight(6)
+        self.progress_bar.hide()
+        layout.addWidget(self.progress_bar)
+
+        self._progress_timer = QTimer(self)
+        self._progress_timer.setInterval(20)
+        self._progress_timer.timeout.connect(self._animate_progress)
+        self._progress_value = 0
+        self._progress_direction = 1
+
+        # --- Status label ---
         self.status_label = QLabel("")
         self.status_label.setObjectName("statusLabel")
         self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -218,31 +259,63 @@ class LauncherWindow(QMainWindow):
 
         # Keep references to running workers so they aren't garbage collected mid-run.
         self._active_worker = None
+        self._close_on_success = False
 
     def _set_buttons_enabled(self, enabled):
         self.launch_button.setEnabled(enabled)
         self.refresh_button.setEnabled(enabled)
 
-    def _run_backend(self, target, status_message, *args, **kwargs):
+    def _run_backend(self, target, status_message, *args, close_on_success=False, **kwargs):
         self._set_buttons_enabled(False)
         self.status_label.setText(status_message)
+        self._progress_value = 0
+        self._progress_direction = 1
+        self.progress_bar.setValue(0)
+        self.progress_bar.show()
+        self._progress_timer.start()
+        self._close_on_success = close_on_success
 
         self._active_worker = BackendWorker(target, *args, **kwargs)
+        self._active_worker.status_signal.connect(self._on_status_update)
         self._active_worker.finished_signal.connect(self._on_backend_finished)
         self._active_worker.start()
+
+    def _animate_progress(self):
+        # Bounces the fill back and forth to read as "busy", since we
+        # don't know how far through the backend steps we are.
+        self._progress_value += self._progress_direction * 3
+        if self._progress_value >= 100:
+            self._progress_value = 100
+            self._progress_direction = -1
+        elif self._progress_value <= 0:
+            self._progress_value = 0
+            self._progress_direction = 1
+        self.progress_bar.setValue(self._progress_value)
+
+    def _on_status_update(self, message):
+        # Runs on the GUI thread (Qt queues the cross-thread signal for us).
+        self.status_label.setText(message.strip())
 
     def _on_backend_finished(self, success, error_message):
         self._set_buttons_enabled(True)
         self._active_worker = None
+        self._progress_timer.stop()
+        self.progress_bar.hide()
 
-        if success:
-            self.status_label.setText("Done.")
-        else:
+        if not success:
             self.status_label.setText("")
             QMessageBox.critical(self, "Error", error_message or "Operation failed.")
+            return
+        # On success, leave the label showing the last status message
+        # the backend reported (e.g. "GUI launched successfully.").
+
+        if self._close_on_success:
+            # Give the user a moment to see the final status message
+            # before the launcher hands off to the real app and quits.
+            QTimer.singleShot(1200, self.close)
 
     def _on_launch_clicked(self):
-        self._run_backend(launch, "Launching Apple Music...")
+        self._run_backend(launch, "Launching Apple Music...", close_on_success=True)
 
     def _on_refresh_clicked(self):
         dialog = LoginDialog(self)
