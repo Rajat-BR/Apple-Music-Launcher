@@ -5,7 +5,13 @@ import socket
 
 from pathlib import Path
 
-DEFAULT_CONFIG_PATH = Path(__file__).parent / "config.json"
+CONFIG_DIR = Path.home() / "Library" / "Application Support" / "AppleMusicLauncher"
+DEFAULT_CONFIG_PATH = CONFIG_DIR / "config.json"
+
+DEFAULT_CONFIG = {
+    "gui_path": "",
+    "wrapper_path": "",
+}
 
 # Populated by load_config(). Read by start_gui(), start_wrapper(),
 # and login_wrapper() below.
@@ -35,6 +41,20 @@ def report_status(message, status_callback=None):
         status_callback(message)
 
 
+def _ensure_config_exists(path):
+    """
+    Creates the config directory and a default config.json if either
+    is missing. The packaged .app is treated as read-only, so this
+    lives outside the bundle in ~/Library/Application Support - the
+    file is safe to edit and survives app rebuilds/reinstalls.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    if not path.exists():
+        with open(path, 'w') as f:
+            json.dump(DEFAULT_CONFIG, f, indent=2)
+
+
 def load_config(config_path=None):
     """
     Load and validate config.json, populating the module-level
@@ -47,6 +67,8 @@ def load_config(config_path=None):
 
     path = config_path or DEFAULT_CONFIG_PATH
 
+    _ensure_config_exists(path)
+
     try:
         with open(path, 'r') as f:
             config = json.load(f)
@@ -55,10 +77,13 @@ def load_config(config_path=None):
     except json.JSONDecodeError:
         raise LauncherError("config.json contains invalid JSON.")
 
-    if not config["gui_path"]:
-        raise LauncherError("GUI path is not configured !")
+    gui = config.get("gui_path")
+    wrapper = config.get("wrapper_path")
 
-    candidate_gui_path = Path(config["gui_path"])
+    if not gui:
+        raise LauncherError("GUI path is not configured.")
+
+    candidate_gui_path = Path(gui)
 
     # Check if the path doesn't exist
     if not candidate_gui_path.exists():
@@ -69,10 +94,10 @@ def load_config(config_path=None):
         raise LauncherError("GUI path must be a directory")
 
     # Check if the path is empty
-    if not config["wrapper_path"]:
+    if not wrapper:
         raise LauncherError("Wrapper path is not configured.")
 
-    candidate_wrapper_path = Path(config["wrapper_path"])
+    candidate_wrapper_path = Path(wrapper)
 
     # Check if the path doesn't exist
     if not candidate_wrapper_path.exists():
