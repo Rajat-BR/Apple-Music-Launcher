@@ -21,8 +21,24 @@ from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal
 
 from launcher_backend import launch, refresh_login, load_config, LauncherError
 
-BANNER_PATH = Path(__file__).parent / "banner.png"
-ICON_PATH = Path(__file__).parent / "icon.png"
+
+def resource_path(relative_path):
+    """
+    Resolves a bundled asset (banner.png, icon.png, etc.) to an
+    absolute path.
+
+    When run as a plain script, that's just next to this file - same
+    as before. When frozen into a macOS .app with PyInstaller, the
+    app's bundled data files are extracted to a temp folder exposed
+    as sys._MEIPASS, so we look there instead.
+    """
+    if hasattr(sys, "_MEIPASS"):
+        return Path(sys._MEIPASS) / relative_path
+    return Path(__file__).parent / relative_path
+
+
+BANNER_PATH = resource_path("banner.png")
+ICON_PATH = resource_path("icon.png")
 
 WINDOW_WIDTH = 420
 WINDOW_HEIGHT = 560
