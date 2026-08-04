@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 import time
 import socket
@@ -12,6 +13,29 @@ DEFAULT_CONFIG = {
     "gui_path": "",
     "wrapper_path": "",
 }
+
+# Common locations for the docker CLI on macOS. A .app launched from
+# Finder/Dock doesn't go through the user's shell, so it doesn't pick
+# up PATH changes from .zshrc/.bash_profile the way a Terminal-run
+# script does - "docker" can be found fine from Terminal but raise
+# FileNotFoundError from a packaged .app. This lets subprocess find
+# it either way without changing any of the actual docker calls.
+COMMON_DOCKER_PATHS = [
+    "/usr/local/bin",
+    "/opt/homebrew/bin",
+    "/Applications/Docker.app/Contents/Resources/bin",
+]
+
+
+def _ensure_docker_on_path():
+    path_entries = os.environ.get("PATH", "").split(os.pathsep)
+
+    for candidate in COMMON_DOCKER_PATHS:
+        if candidate not in path_entries and Path(candidate).is_dir():
+            path_entries.append(candidate)
+
+    os.environ["PATH"] = os.pathsep.join(path_entries)
+
 
 # Populated by load_config(). Read by start_gui(), start_wrapper(),
 # and login_wrapper() below.
@@ -64,6 +88,8 @@ def load_config(config_path=None):
     refresh_login(). Raises LauncherError if the config is invalid.
     """
     global gui_path, wrapper_path
+
+    _ensure_docker_on_path()
 
     path = config_path or DEFAULT_CONFIG_PATH
 
