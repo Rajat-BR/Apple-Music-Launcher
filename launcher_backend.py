@@ -286,6 +286,51 @@ def wait_for_wrapper(timeout=30, status_callback=None):
 
         time.sleep(1)
 
+_ENV_VARS_TO_RESET = (
+    "DYLD_LIBRARY_PATH",
+    "DYLD_FRAMEWORK_PATH",
+    "DYLD_FALLBACK_LIBRARY_PATH",
+    "DYLD_FALLBACK_FRAMEWORK_PATH",
+    "DYLD_VERSIONED_LIBRARY_PATH",
+    "DYLD_VERSIONED_FRAMEWORK_PATH",
+    "DYLD_INSERT_LIBRARIES",
+    "LD_LIBRARY_PATH",
+    "QT_PLUGIN_PATH",
+    "QT_QPA_PLATFORM_PLUGIN_PATH",
+    "PYTHONHOME",
+    "PYTHONPATH",
+    "PYTHONEXECUTABLE",
+)
+
+
+def _clean_subprocess_env():
+    """
+    Returns a copy of the environment with PyInstaller's/Qt's own
+    library and plugin path overrides removed/restored to their
+    pre-bundle originals.
+
+    When this launcher itself is a packaged .app, PyInstaller (and
+    PyQt6 itself) can set several DYLD_*/QT_*/PYTHON* variables so
+    its own bundled Python/Qt libraries and plugins get found first.
+    Any subprocess we spawn inherits those - fine for something like
+    `docker`, but for the real app's own separate venv Python (its
+    own Qt install), inheriting even one of these can make two
+    different QtCore.framework copies load into that single process,
+    which breaks Qt's "cocoa" platform plugin and the window never
+    appears. Only used for that specific subprocess call.
+    """
+    env = os.environ.copy()
+
+    for key in _ENV_VARS_TO_RESET:
+        original = env.pop(f"{key}_ORIG", None)
+        if original is not None:
+            env[key] = original
+        else:
+            env.pop(key, None)
+
+    return env
+
+
 def start_gui(status_callback=None):
 
     report_status("Starting GUI...", status_callback)
@@ -300,15 +345,19 @@ def start_gui(status_callback=None):
     if not main_script.exists():
         raise LauncherError("GUI entry point not found.")
 
+    log_path = CONFIG_DIR / "gui_subprocess.log"
+
     try:
-        subprocess.Popen(
-            [str(python_executable), str(main_script)],
-            cwd=gui_root,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-        )
+        with open(log_path, "a") as log_file:
+            subprocess.Popen(
+                [str(python_executable), str(main_script)],
+                cwd=gui_root,
+                stdin=subprocess.DEVNULL,
+                stdout=log_file,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+                env=_clean_subprocess_env(),
+            )
 
     except FileNotFoundError:
         raise LauncherError("Failed to launch GUI.")

@@ -318,9 +318,20 @@ class LauncherWindow(QMainWindow):
 
     def _on_backend_finished(self, success, error_message):
         self._set_buttons_enabled(True)
-        self._active_worker = None
         self._progress_timer.stop()
         self.progress_bar.hide()
+
+        # finished_signal is emitted as the last line of run(), but the
+        # underlying OS thread may not have fully wound down by the time
+        # this slot runs on the GUI thread. wait() blocks briefly (it's
+        # already done or nearly done) to guarantee that before we drop
+        # our last reference to the QThread object below - otherwise
+        # Python's GC can destroy it while Qt still considers it running,
+        # which can crash a packaged .app even though it's harmless when
+        # run as a plain script.
+        if self._active_worker is not None:
+            self._active_worker.wait()
+        self._active_worker = None
 
         if not success:
             self.status_label.setText("")
